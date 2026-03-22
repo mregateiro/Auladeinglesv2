@@ -1,0 +1,255 @@
+{
+  "id": "english-3ano",
+  "title": "English – 3rd Grade (Year 1)",
+  "titlePt": "Inglês – 3.º Ano (1.º ano de Inglês)",
+  "icon": "🇬🇧",
+  "description": "First year of English – 3rd grade Portugal – Aprendizagens Essenciais",
+  "descriptionPt": "1.º ano de Inglês – 3.º ano de escolaridade – Aprendizagens Essenciais",
+  "targetLanguage": "English",
+  "nativeLanguage": "Portuguese",
+  "speechLang": "en-GB",
+  "level": "A1.1",
+  "ageGroup": "children-8",
+  "modules": [
+    {
+      "id": "hello-me",
+      "title": "Hello! All About Me",
+      "titlePt": "Olá! Tudo Sobre Mim",
+      "icon": "👋",
+      "topics": [
+        "Greetings: Hello, Hi, Good morning, Good afternoon, Good evening, Goodbye, Bye, See you",
+        "Introducing yourself: What's your name? My name is… / I'm… How old are you? I'm 8.",
+        "Feelings: How are you? I'm fine / happy / sad / tired / scared / angry / hungry / thirsty",
+        "Polite words: Please, Thank you, Sorry, You're welcome",
+        "The English alphabet: A to Z – spelling your name"
+      ],
+      "objectives": [
+        "Greet and say goodbye in English",
+        "Say your name and age",
+        "Ask and answer How are you?",
+        "Use basic polite expressions",
+        "Recognise and say the 26 letters of the alphabet"
+      ]
+    },
+    {
+      "id": "numbers-colours",
+      "title": "Numbers & Colours",
+      "titlePt": "Números e Cores",
+      "icon": "🎨",
+      "topics": [
+        "Numbers 1 to 20: one, two, three… twenty",
+        "Colours: red, blue, yellow, green, orange, purple, pink, black, white, brown, grey",
+        "Asking about colour: What colour is it? It's red. What's your favourite colour? My favourite colour is blue.",
+        "Counting objects: How many pencils? Three pencils. How many books? Five books.",
+        "Combining colours and numbers: I have got two red apples. There are three blue cars."
+      ],
+      "objectives": [
+        "Count from 1 to 20 in English",
+        "Name the basic colours",
+        "Ask and answer What colour is it?",
+        "Count objects using How many…?",
+        "Combine numbers and colours in short sentences"
+      ]
+    },
+    {
+      "id": "classroom",
+      "title": "My Classroom",
+      "titlePt": "A Minha Sala de Aula",
+      "icon": "🏫",
+      "topics": [
+        "School objects: pencil, pen, rubber/eraser, ruler, sharpener, book, notebook, schoolbag, pencil case, scissors, glue, crayon",
+        "Classroom language: Open your book, Close the door, Sit down, Stand up, Listen, Look, Read, Write, Repeat, Put your hand up",
+        "What's this? It's a pencil. What are these? They're crayons.",
+        "Asking for help: Can I have a pencil, please? Here you are. Thank you.",
+        "Singular and plural: a book / two books, a pencil / three pencils"
+      ],
+      "objectives": [
+        "Name common school objects",
+        "Understand and follow classroom instructions",
+        "Ask What's this? and answer",
+        "Ask politely for objects",
+        "Recognise singular and plural nouns"
+      ]
+    },
+    {
+      "id": "family",
+      "title": "My Family",
+      "titlePt": "A Minha Família",
+      "icon": "👨‍👩‍👧‍👦",
+      "topics": [
+        "Family members: mother/mum, father/dad, sister, brother, grandmother/grandma, grandfather/grandpa, baby",
+        "Introducing family: This is my mum. Her name is… He is my brother.",
+        "Possessive adjectives: my, your, his, her – my mum, your dad, his sister, her brother",
+        "I have got / I haven't got: I have got a sister. I haven't got a brother. Have you got a pet?",
+        "Family descriptions: My mum is tall. My dad is funny. My sister is young."
+      ],
+      "objectives": [
+        "Name close family members",
+        "Introduce family members using This is my…",
+        "Use my, your, his, her correctly",
+        "Use I have got / I haven't got for family",
+        "Describe family with simple adjectives"
+      ]
+    },
+    {
+      "id": "pets-animals",
+      "title": "Pets & Animals",
+      "titlePt": "Animais de Estimação e Animais",
+      "icon": "🐾",
+      "topics": [
+        "Pets: dog, cat, fish, bird, hamster, rabbit, turtle",
+        "Farm animals: cow, horse, pig, sheep, chicken, duck",
+        "Wild animals: lion, elephant, monkey, snake, bear, giraffe, crocodile",
+        "Describing animals: It's big / small / fast / slow. It's brown. It can run / swim / fly / jump.",
+        "Talking about pets: Have you got a pet? Yes, I have. I've got a dog. His name is Max."
+      ],
+      "objectives": [
+        "Name common pets, farm and wild animals",
+        "Describe animals using adjectives",
+        "Use can for animal abilities",
+        "Talk about your pet using have got",
+        "Answer questions about animals"
+      ]
+    },
+    {
+      "id": "body-parts",
+      "title": "My Body",
+      "titlePt": "O Meu Corpo",
+      "icon": "🧍",
+      "topics": [
+        "Head and face: head, hair, eyes, ears, nose, mouth, teeth, face",
+        "Body: shoulders, arms, hands, fingers, legs, knees, feet, toes, tummy",
+        "The senses: I can see with my eyes. I can hear with my ears. I can smell with my nose.",
+        "Instructions with body parts: Touch your nose! Clap your hands! Stamp your feet! Shake your head!",
+        "Describing yourself: I have got brown eyes and black hair. I have got two hands and ten fingers."
+      ],
+      "objectives": [
+        "Name the main parts of the body and face",
+        "Follow instructions involving body parts",
+        "Use have got to describe physical features",
+        "Connect senses to body parts",
+        "Describe yourself simply"
+      ]
+    },
+    {
+      "id": "food-drinks",
+      "title": "Food & Drinks",
+      "titlePt": "Comida e Bebidas",
+      "icon": "🍕",
+      "topics": [
+        "Fruit: apple, banana, orange, grapes, strawberry, pear, watermelon",
+        "Food: bread, cheese, cake, pizza, rice, chicken, egg, sandwich, biscuit, ice cream, chocolate",
+        "Drinks: water, milk, juice, lemonade",
+        "Likes and dislikes: I like pizza. I don't like cheese. Do you like bananas? Yes, I do. / No, I don't.",
+        "Meals: breakfast, lunch, dinner – I have milk for breakfast."
+      ],
+      "objectives": [
+        "Name common fruits, foods and drinks",
+        "Express likes and dislikes with I like / I don't like",
+        "Ask Do you like…? and answer",
+        "Name the three main meals",
+        "Say what you eat and drink"
+      ]
+    },
+    {
+      "id": "toys-games",
+      "title": "Toys, Games & Playground",
+      "titlePt": "Brinquedos, Jogos e Recreio",
+      "icon": "🎮",
+      "topics": [
+        "Toys: ball, doll, teddy bear, car, train, robot, puzzle, bike, skateboard, kite",
+        "Playground: slide, swing, seesaw, climbing frame, sandpit",
+        "I like / I want: I like my bike. I want a robot. My favourite toy is my teddy bear.",
+        "Sharing: Can I play? Yes! Let's play together. It's my turn. It's your turn.",
+        "Colours and toys: I have got a red ball. She has got a blue doll."
+      ],
+      "objectives": [
+        "Name common toys and playground equipment",
+        "Express preferences and wishes about toys",
+        "Use Let's and Can I…? for play",
+        "Describe toys using colours and adjectives",
+        "Take turns speaking in English"
+      ]
+    },
+    {
+      "id": "days-seasons",
+      "title": "Days of the Week & Seasons",
+      "titlePt": "Dias da Semana e Estações",
+      "icon": "📅",
+      "topics": [
+        "Days: Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday",
+        "Today, yesterday, tomorrow: What day is it today? Today is Monday.",
+        "Seasons: spring, summer, autumn, winter",
+        "Weather basics: sunny, rainy, cloudy, windy, hot, cold",
+        "Connecting seasons and weather: In summer it's hot and sunny. In winter it's cold and rainy."
+      ],
+      "objectives": [
+        "Name all seven days of the week in order",
+        "Ask and answer What day is it today?",
+        "Name the four seasons",
+        "Use basic weather words",
+        "Associate seasons with weather"
+      ]
+    },
+    {
+      "id": "actions-can",
+      "title": "I Can Do It!",
+      "titlePt": "Eu Consigo!",
+      "icon": "🏃",
+      "topics": [
+        "Action verbs: run, jump, swim, fly, sing, dance, draw, read, write, climb, ride a bike, play football",
+        "Can / Can't: I can swim. I can't fly. Can you dance? Yes, I can. / No, I can't.",
+        "Let's play! Imperatives: Run! Jump! Stop! Clap! Sing! Dance! Don't run!",
+        "Simon says: Simon says touch your head! Simon says jump!",
+        "Talking about abilities: I can read in English. She can sing. He can't ride a bike."
+      ],
+      "objectives": [
+        "Use common action verbs",
+        "Express what you can and can't do",
+        "Ask Can you…? and answer",
+        "Understand and follow imperatives",
+        "Play games using English instructions"
+      ]
+    },
+    {
+      "id": "celebrations-3",
+      "title": "Celebrations",
+      "titlePt": "Celebrações",
+      "icon": "🎄",
+      "topics": [
+        "Christmas: Christmas tree, Santa Claus, present, star, stocking, Merry Christmas, reindeer",
+        "Halloween: pumpkin, witch, ghost, bat, spider, trick or treat, Happy Halloween",
+        "Easter: Easter egg, bunny, spring, flowers, Happy Easter",
+        "Birthday: Happy Birthday, cake, candles, balloons, present, party, How old are you?",
+        "Carnival: mask, costume, clown, music, dance"
+      ],
+      "objectives": [
+        "Recognise major English-speaking celebrations",
+        "Learn key vocabulary for each celebration",
+        "Say Merry Christmas, Happy Birthday, etc.",
+        "Compare celebrations in Portugal and the UK",
+        "Talk about your birthday (age, month)"
+      ]
+    },
+    {
+      "id": "first-sentences",
+      "title": "My First Sentences",
+      "titlePt": "As Minhas Primeiras Frases",
+      "icon": "💬",
+      "topics": [
+        "I am / I'm: I'm 8. I'm happy. I'm Portuguese. I'm a boy / a girl.",
+        "I like / I don't like: I like football. I don't like spiders.",
+        "I have got / I haven't got: I have got a dog. I haven't got a cat.",
+        "I can / I can't: I can swim. I can't fly.",
+        "Questions and answers: What's your name? How old are you? What colour? How many? Do you like…?"
+      ],
+      "objectives": [
+        "Build sentences with I am, I like, I have got, I can",
+        "Use negative forms: don't like, haven't got, can't",
+        "Ask and answer simple questions",
+        "Talk about yourself in 4–5 sentences",
+        "Use English to communicate basic information"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  aprendizagem:
+    build: .
+    container_name: plataforma-aprendizagem
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+      - ./courses:/app/courses
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_PATH=/app/data/learn.json
+      # ── LLM Config ──
+      # Ollama no desktop (substituir pelo IP real):
+      - PROVIDER=ollama
+      - LLM_URL=http://192.168.1.50:11434
+      - LLM_MODEL=llama3
+      # Para OpenAI/Groq/Mistral, comentar acima e descomentar:
+      # - PROVIDER=openai
+      # - LLM_URL=https://api.openai.com/v1
+      # - LLM_MODEL=gpt-4o-mini
+      # - LLM_API_KEY=sk-...
+    restart: unless-stopped

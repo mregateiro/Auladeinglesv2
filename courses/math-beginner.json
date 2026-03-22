@@ -1,0 +1,55 @@
+{
+  "id": "math-beginner",
+  "title": "Matemática",
+  "titlePt": "Matemática",
+  "icon": "🔢",
+  "description": "Learn basic math concepts",
+  "descriptionPt": "Aprende conceitos básicos de matemática",
+  "targetLanguage": "Portuguese",
+  "nativeLanguage": "Portuguese",
+  "speechLang": "pt-PT",
+  "level": "beginner",
+  "ageGroup": "children",
+  "modules": [
+    {
+      "id": "counting",
+      "title": "Contar",
+      "titlePt": "Contar",
+      "icon": "🔢",
+      "topics": ["Contar até 10", "Contar até 50", "Contar até 100"],
+      "objectives": ["Contar objetos", "Sequências numéricas", "Contar para trás"]
+    },
+    {
+      "id": "addition",
+      "title": "Adição",
+      "titlePt": "Adição",
+      "icon": "➕",
+      "topics": ["Somar até 10", "Somar até 20", "Problemas com adição"],
+      "objectives": ["Somar dois números simples", "Resolver problemas do dia-a-dia", "Usar o símbolo +"]
+    },
+    {
+      "id": "subtraction",
+      "title": "Subtração",
+      "titlePt": "Subtração",
+      "icon": "➖",
+      "topics": ["Subtrair até 10", "Subtrair até 20", "Problemas com subtração"],
+      "objectives": ["Subtrair números simples", "Entender o conceito de 'tirar'", "Usar o símbolo -"]
+    },
+    {
+      "id": "shapes",
+      "title": "Formas",
+      "titlePt": "Formas Geométricas",
+      "icon": "🔷",
+      "topics": ["Círculo, quadrado, triângulo", "Retângulo, estrela, losango", "Formas no mundo real"],
+      "objectives": ["Identificar formas básicas", "Contar lados e cantos", "Encontrar formas no dia-a-dia"]
+    },
+    {
+      "id": "measurement",
+      "title": "Medidas",
+      "titlePt": "Medidas",
+      "icon": "📏",
+      "topics": ["Grande e pequeno", "Comprido e curto", "Pesado e leve"],
+      "objectives": ["Comparar tamanhos", "Usar palavras de medida", "Ordenar objetos por tamanho"]
+    }
+  ]
+}
