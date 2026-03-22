@@ -2,6 +2,11 @@
 // SPA com seleção de cursos, geração LLM e explicações de quiz
 
 const App = {
+  // Account (Google OAuth identity)
+  accountId: null,
+  accountName: null,
+  accountPicture: null,
+  // Active profile (learning profile)
   userId: null,
   userName: null,
   userAvatar: null,
@@ -25,9 +30,20 @@ const App = {
 
     try {
       const session = await this.api('/api/auth/session');
-      this.setCurrentUser(session.user);
-      this.showCourseSelection();
-      return;
+      if (session.account) {
+        this.setCurrentAccount(session.account);
+      }
+      if (session.user) {
+        this.setCurrentUser(session.user);
+      }
+      if (session.needsProfileSelection) {
+        this.showProfileSelection();
+        return;
+      }
+      if (session.user) {
+        this.showCourseSelection();
+        return;
+      }
     } catch (e) {
       console.error('Sessão anterior não restaurada:', e.message);
     }
@@ -65,6 +81,26 @@ const App = {
     this.userAvatar = user.avatar;
     this.userPicture = user.picture || null;
     this.userAuthProvider = user.authProvider || 'local';
+  },
+
+  setCurrentAccount(account) {
+    this.accountId = account.id;
+    this.accountName = account.name;
+    this.accountPicture = account.picture || null;
+  },
+
+  clearCurrentUser() {
+    this.userId = null;
+    this.userName = null;
+    this.userAvatar = null;
+    this.userPicture = null;
+    this.userAuthProvider = 'local';
+  },
+
+  clearCurrentAccount() {
+    this.accountId = null;
+    this.accountName = null;
+    this.accountPicture = null;
   },
 
   currentUserProfile() {
@@ -151,8 +187,8 @@ const App = {
         method: 'POST',
         body: { credential: response.credential }
       });
-      this.setCurrentUser(result.user);
-      this.showCourseSelection();
+      this.setCurrentAccount(result.account);
+      this.showProfileSelection(result.profiles || []);
     } catch (err) {
       alert('Não foi possível entrar com Google: ' + err.message);
       this.showUserSelection();
@@ -220,7 +256,8 @@ const App = {
   // ═══════════════════════════════════════════════════════════
   async showUserSelection() {
     this.currentView = 'users';
-    this.userId = null;
+    this.clearCurrentUser();
+    this.clearCurrentAccount();
     this.currentCourse = null;
 
     let users = [];
@@ -230,7 +267,10 @@ const App = {
       console.error('Falha ao carregar utilizadores:', e);
     }
 
-    const usersHtml = users.map(u => `
+    // Only show local (non-account) profiles on this screen
+    const localUsers = users.filter(u => !u.accountId);
+
+    const usersHtml = localUsers.map(u => `
       <div class="user-card" onclick="App.loginUser(${u.id}, ${u.pin ? 'true' : 'false'})">
         <button class="delete-btn" onclick="event.stopPropagation(); App.deleteUser(${u.id}, '${u.name}')" title="Apagar">🗑️</button>
         <span class="avatar">${u.avatar}</span>
@@ -239,12 +279,20 @@ const App = {
       </div>
     `).join('');
 
+    const googleSection = this.googleEnabled ? `
+      <div class="google-login-section">
+        <p class="google-login-label">Entrar com conta Google para gerir perfis</p>
+        <div id="googleLoginButton"></div>
+      </div>
+    ` : '';
+
     this.render(`
       <div class="user-selection">
         <div class="header">
           <h1>🎓 Plataforma de Aprendizagem</h1>
           <p>Quem vai aprender hoje?</p>
         </div>
+        ${googleSection}
         <div class="users-grid">
           ${usersHtml}
           <div class="user-card add-user-card" onclick="App.showCreateUserModal()">
@@ -254,6 +302,199 @@ const App = {
         </div>
       </div>
     `);
+
+    if (this.googleEnabled) {
+      setTimeout(() => this.renderGoogleButton(), 100);
+    }
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  // SELEÇÃO DE PERFIL (conta Google)
+  // ═══════════════════════════════════════════════════════════
+  async showProfileSelection(profiles = null) {
+    this.currentView = 'profiles';
+    this.clearCurrentUser();
+    this.currentCourse = null;
+
+    if (profiles === null) {
+      try {
+        profiles = await this.api(`/api/accounts/${this.accountId}/profiles`);
+      } catch (e) {
+        console.error('Falha ao carregar perfis:', e);
+        profiles = [];
+      }
+    }
+
+    const accountPicHtml = this.accountPicture
+      ? `<img class="avatar avatar-image" src="${this.escapeHtml(this.accountPicture)}" alt="${this.escapeHtml(this.accountName || '')}">`
+      : `<span class="avatar">👤</span>`;
+
+    const profilesHtml = profiles.map(p => `
+      <div class="user-card" onclick="App.selectProfile(${p.id}, ${p.hasPin ? 'true' : 'false'})">
+        <span class="avatar">${this.escapeHtml(p.avatar || '🧒')}</span>
+        <div class="name">${this.escapeHtml(p.name)}</div>
+        <div class="stats">⭐ ${p.totalStars || 0} &nbsp; 🔥 ${p.currentStreak || 0} dias</div>
+      </div>
+    `).join('');
+
+    this.render(`
+      <div class="user-selection">
+        <div class="header">
+          <div class="account-info">
+            ${accountPicHtml}
+            <div>
+              <div class="account-name">${this.escapeHtml(this.accountName || 'Conta Google')}</div>
+              <button class="btn-link" onclick="App.logoutAccount()">Trocar conta</button>
+            </div>
+          </div>
+          <h2>Escolhe o teu perfil</h2>
+        </div>
+        <div class="users-grid">
+          ${profilesHtml}
+          <div class="user-card add-user-card" onclick="App.showCreateProfileModal()">
+            <span class="plus">+</span>
+            <span>Novo Perfil</span>
+          </div>
+        </div>
+      </div>
+    `);
+  },
+
+  async selectProfile(profileId, hasPin) {
+    if (hasPin) {
+      this.showProfilePinModal(profileId);
+      return;
+    }
+    try {
+      const result = await this.api('/api/auth/select-profile', {
+        method: 'POST',
+        body: { profileId }
+      });
+      this.setCurrentUser(result.user);
+      this.showCourseSelection();
+    } catch (err) {
+      alert('Erro: ' + err.message);
+    }
+  },
+
+  showProfilePinModal(profileId) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    overlay.innerHTML = `
+      <div class="modal">
+        <h2>🔒 Introduz o PIN</h2>
+        <div class="pin-input-group">
+          <input class="pin-digit" type="text" maxlength="1" inputmode="numeric" pattern="[0-9]" autofocus>
+          <input class="pin-digit" type="text" maxlength="1" inputmode="numeric" pattern="[0-9]">
+          <input class="pin-digit" type="text" maxlength="1" inputmode="numeric" pattern="[0-9]">
+          <input class="pin-digit" type="text" maxlength="1" inputmode="numeric" pattern="[0-9]">
+        </div>
+        <div class="modal-buttons">
+          <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+          <button class="btn btn-primary" onclick="App.submitProfilePin(${profileId})">Entrar</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const digits = overlay.querySelectorAll('.pin-digit');
+    digits.forEach((input, i) => {
+      input.addEventListener('input', () => {
+        if (input.value && i < 3) digits[i + 1].focus();
+        if (i === 3 && input.value) this.submitProfilePin(profileId);
+      });
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Backspace' && !input.value && i > 0) digits[i - 1].focus();
+      });
+    });
+    setTimeout(() => digits[0].focus(), 100);
+  },
+
+  async submitProfilePin(profileId) {
+    const digits = document.querySelectorAll('.pin-digit');
+    const pin = Array.from(digits).map(d => d.value).join('');
+    if (pin.length !== 4) return;
+    try {
+      const result = await this.api('/api/auth/select-profile', {
+        method: 'POST',
+        body: { profileId, pin }
+      });
+      this.setCurrentUser(result.user);
+      document.querySelector('.modal-overlay')?.remove();
+      this.showCourseSelection();
+    } catch (err) {
+      const pinDigits = document.querySelectorAll('.pin-digit');
+      pinDigits.forEach(d => { d.value = ''; d.style.borderColor = 'var(--danger)'; });
+      pinDigits[0].focus();
+    }
+  },
+
+  // ─── Modal Criar Perfil (conta Google) ──────────────────
+  showCreateProfileModal() {
+    const avatars = ['🧒', '👦', '👧', '🧒🏻', '👦🏻', '👧🏻', '🧒🏽', '👦🏽', '👧🏽', '🧒🏿', '👦🏿', '👧🏿', '🦸', '🧙', '🐱', '🐶'];
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    overlay.innerHTML = `
+      <div class="modal">
+        <h2>👋 Novo Perfil</h2>
+        <div class="form-group">
+          <label>Nome</label>
+          <input type="text" id="newProfileName" placeholder="Escreve o nome..." maxlength="30" autofocus>
+        </div>
+        <div class="form-group">
+          <label>Escolhe o avatar</label>
+          <div class="avatar-picker">
+            ${avatars.map((a, i) => `
+              <button class="avatar-option ${i === 0 ? 'selected' : ''}" data-avatar="${a}" onclick="App.selectAvatar(this)">${a}</button>
+            `).join('')}
+          </div>
+        </div>
+        <div class="form-group">
+          <label>PIN (opcional)</label>
+          <input type="text" id="newProfilePin" placeholder="4 dígitos (opcional)" maxlength="4" inputmode="numeric" pattern="[0-9]*">
+        </div>
+        <div class="modal-buttons">
+          <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+          <button class="btn btn-primary" onclick="App.createProfile()">Criar! 🎉</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    setTimeout(() => document.getElementById('newProfileName')?.focus(), 100);
+  },
+
+  async createProfile() {
+    const name = document.getElementById('newProfileName')?.value?.trim();
+    const avatar = document.querySelector('.avatar-option.selected')?.dataset?.avatar || '🧒';
+    const pin = document.getElementById('newProfilePin')?.value?.trim() || null;
+
+    if (!name) {
+      document.getElementById('newProfileName').style.borderColor = 'var(--danger)';
+      return;
+    }
+
+    try {
+      await this.api(`/api/accounts/${this.accountId}/profiles`, {
+        method: 'POST',
+        body: { name, avatar, pin: pin && pin.length === 4 ? pin : null }
+      });
+      document.querySelector('.modal-overlay')?.remove();
+      this.showProfileSelection();
+    } catch (err) {
+      alert('Erro ao criar perfil: ' + err.message);
+    }
+  },
+
+  async logoutAccount() {
+    await this.api('/api/logout', { method: 'POST' }).catch(() => {});
+    this.clearCurrentUser();
+    this.clearCurrentAccount();
+    if (window.google?.accounts?.id) {
+      window.google.accounts.id.disableAutoSelect();
+    }
+    this.showUserSelection();
   },
 
   // ─── Modal Criar Utilizador ──────────────────────────────
@@ -538,8 +779,12 @@ const App = {
   async logout() {
     await this.api('/api/logout', { method: 'POST' }).catch(() => {});
     document.cookie = 'userId=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
-    this.userId = null;
+    this.clearCurrentUser();
+    this.clearCurrentAccount();
     this.currentCourse = null;
+    if (window.google?.accounts?.id) {
+      window.google.accounts.id.disableAutoSelect();
+    }
     this.showUserSelection();
   },
 

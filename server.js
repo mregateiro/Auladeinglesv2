@@ -14,6 +14,34 @@ const PORT = config.port;
 const SESSION_TTL_MS = config.sessionTtlDays * 24 * 60 * 60 * 1000;
 const googleClient = config.googleClientId ? new OAuth2Client(config.googleClientId) : null;
 
+// ─── Simple in-memory rate limiter ───────────────────────
+// Limits requests per IP within a sliding window.
+const rateLimitStore = new Map();
+function rateLimit({ windowMs = 60000, max = 10 } = {}) {
+  return (req, res, next) => {
+    const ip = req.ip || req.connection.remoteAddress || 'unknown';
+    const now = Date.now();
+    const entry = rateLimitStore.get(ip) || { count: 0, resetAt: now + windowMs };
+    if (now > entry.resetAt) {
+      entry.count = 0;
+      entry.resetAt = now + windowMs;
+    }
+    entry.count++;
+    rateLimitStore.set(ip, entry);
+    if (entry.count > max) {
+      return res.status(429).json({ error: 'Too many requests, please try again later' });
+    }
+    next();
+  };
+}
+// Periodically purge stale entries to prevent unbounded memory growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of rateLimitStore) {
+    if (now > entry.resetAt) rateLimitStore.delete(ip);
+  }
+}, 5 * 60 * 1000).unref();
+
 if (config.trustProxy) {
   app.set('trust proxy', 1);
 }
@@ -33,7 +61,13 @@ app.use((req, res, next) => {
 
   db.touchSession(token, SESSION_TTL_MS);
   req.authSession = session;
-  req.authUser = db.getUserById(session.user_id);
+
+  if (session.account_id) {
+    req.authAccount = db.getAccountById(session.account_id);
+  }
+  if (session.user_id) {
+    req.authUser = db.getUserById(session.user_id);
+  }
   next();
 });
 
@@ -65,6 +99,7 @@ function serializeUser(user, options = {}) {
     avatar: user.avatar,
     picture: user.picture || null,
     authProvider: user.auth_provider || 'local',
+    accountId: user.account_id || null,
     hasPin: Boolean(user.pin),
     createdAt: user.created_at,
     lastLogin: user.last_login,
@@ -75,6 +110,18 @@ function serializeUser(user, options = {}) {
   }
 
   return data;
+}
+
+function serializeAccount(account) {
+  if (!account) return null;
+  return {
+    id: account.id,
+    name: account.name,
+    email: account.email || null,
+    picture: account.picture || null,
+    createdAt: account.created_at,
+    lastLogin: account.last_login,
+  };
 }
 
 function isSecureRequest(req) {
@@ -104,14 +151,29 @@ function createUserSession(req, res, user, provider) {
   setSessionCookie(req, res, token);
 }
 
+function createAccountSession(req, res, account) {
+  const { token } = db.createSession(null, SESSION_TTL_MS, 'google', account.id);
+  setSessionCookie(req, res, token);
+}
+
 function requireAuth(req, res, next) {
   if (!req.authUser) return res.status(401).json({ error: 'Authentication required' });
+  next();
+}
+
+function requireAccountAuth(req, res, next) {
+  if (!req.authAccount) return res.status(401).json({ error: 'Google account authentication required' });
   next();
 }
 
 function requireSameUser(req, res, next) {
   if (!req.authUser) return res.status(401).json({ error: 'Authentication required' });
   if (req.authUser.id !== Number(req.params.id)) {
+    // Also allow the account owner to access their own profiles
+    if (req.authAccount) {
+      const profile = db.getUserById(Number(req.params.id));
+      if (profile && profile.account_id === req.authAccount.id) return next();
+    }
     return res.status(403).json({ error: 'Forbidden' });
   }
   next();
@@ -146,7 +208,7 @@ app.post('/api/users', (req, res) => {
   }
 });
 
-app.post('/api/users/:id/login', (req, res) => {
+app.post('/api/users/:id/login', rateLimit({ windowMs: 60000, max: 20 }), (req, res) => {
   const user = db.getUserById(Number(req.params.id));
   if (!user) return res.status(404).json({ error: 'User not found' });
   if ((user.auth_provider || 'local') !== 'local') {
@@ -168,11 +230,15 @@ app.get('/api/auth/config', (req, res) => {
 });
 
 app.get('/api/auth/session', (req, res) => {
-  if (!req.authUser) return res.status(401).json({ error: 'No active session' });
-  res.json({ user: serializeUser(req.authUser, { includeEmail: true }) });
+  if (!req.authUser && !req.authAccount) return res.status(401).json({ error: 'No active session' });
+  res.json({
+    account: serializeAccount(req.authAccount || null),
+    user: serializeUser(req.authUser || null, { includeEmail: true }),
+    needsProfileSelection: Boolean(req.authAccount && !req.authUser),
+  });
 });
 
-app.post('/api/auth/google', async (req, res) => {
+app.post('/api/auth/google', rateLimit({ windowMs: 60000, max: 10 }), async (req, res) => {
   if (!googleClient || !config.googleClientId) {
     return res.status(503).json({ error: 'Google login is not configured' });
   }
@@ -193,15 +259,22 @@ app.post('/api/auth/google', async (req, res) => {
       return res.status(401).json({ error: 'Google account is missing a verified email' });
     }
 
-    const user = db.upsertGoogleUser({
+    const account = db.upsertGoogleAccount({
       googleId: payload.sub,
       email: payload.email,
       name: payload.name || payload.email,
       picture: payload.picture || null,
     });
 
-    createUserSession(req, res, user, 'google');
-    res.json({ user: serializeUser(user, { includeEmail: true }) });
+    createAccountSession(req, res, account);
+
+    const profiles = db.getProfilesByAccountId(account.id).map(u => serializeUser(u));
+
+    res.json({
+      account: serializeAccount(account),
+      profiles,
+      needsProfileSelection: true,
+    });
   } catch (err) {
     console.error('[AUTH][GOOGLE]', err.message);
     res.status(401).json({ error: 'Google sign-in failed' });
@@ -209,7 +282,101 @@ app.post('/api/auth/google', async (req, res) => {
 });
 
 app.delete('/api/users/:id', (req, res) => {
-  db.deleteUser(Number(req.params.id));
+  const targetId = Number(req.params.id);
+
+  // Allow deletion if the requester is the user themselves
+  if (req.authUser && req.authUser.id === targetId) {
+    db.deleteUser(targetId);
+    return res.json({ success: true });
+  }
+
+  // Allow account owner to delete their own profiles
+  if (req.authAccount) {
+    const profile = db.getUserById(targetId);
+    if (profile && profile.account_id === req.authAccount.id) {
+      db.deleteUser(targetId);
+      return res.json({ success: true });
+    }
+  }
+
+  // Allow unauthenticated deletion only for local profiles with no account (backward compat)
+  if (!req.authUser && !req.authAccount) {
+    const profile = db.getUserById(targetId);
+    if (profile && !profile.account_id) {
+      db.deleteUser(targetId);
+      return res.json({ success: true });
+    }
+  }
+
+  return res.status(403).json({ error: 'Forbidden' });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// ACCOUNT PROFILES API  (Google account → multiple profiles)
+// ═══════════════════════════════════════════════════════════════
+
+// Select a profile to use for the current account session
+app.post('/api/auth/select-profile', rateLimit({ windowMs: 60000, max: 20 }), requireAccountAuth, (req, res) => {
+  const profileId = Number(req.body?.profileId);
+  if (!profileId) return res.status(400).json({ error: 'Missing profileId' });
+
+  const profile = db.getUserById(profileId);
+  if (!profile) return res.status(404).json({ error: 'Profile not found' });
+  if (profile.account_id !== req.authAccount.id) {
+    return res.status(403).json({ error: 'Profile does not belong to this account' });
+  }
+
+  if (profile.pin && profile.pin !== req.body?.pin) {
+    return res.status(401).json({ error: 'Wrong PIN' });
+  }
+
+  const token = req.cookies[config.sessionCookieName];
+  db.touchLogin(profileId);
+  db.setSessionProfile(token, profileId);
+
+  res.json({ user: serializeUser(profile) });
+});
+
+// List all profiles for the authenticated account
+app.get('/api/accounts/:id/profiles', requireAccountAuth, (req, res) => {
+  if (req.authAccount.id !== Number(req.params.id)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const profiles = db.getProfilesByAccountId(req.authAccount.id).map(u => {
+    const streak = db.getStreak(u.id);
+    const completedLessons = db.completedCount(u.id);
+    return {
+      ...serializeUser(u),
+      totalStars: streak.total_stars || 0,
+      currentStreak: streak.current_streak || 0,
+      completedLessons,
+    };
+  });
+  res.json(profiles);
+});
+
+// Create a new profile under the authenticated account
+app.post('/api/accounts/:id/profiles', requireAccountAuth, (req, res) => {
+  if (req.authAccount.id !== Number(req.params.id)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const { name, avatar, pin } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
+  try {
+    const profile = db.createProfile(req.authAccount.id, name.trim(), avatar || '🧒', pin || null);
+    res.json(serializeUser(profile));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete a profile under the authenticated account
+app.delete('/api/accounts/:id/profiles/:profileId', requireAccountAuth, (req, res) => {
+  if (req.authAccount.id !== Number(req.params.id)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const deleted = db.deleteProfile(Number(req.params.profileId), req.authAccount.id);
+  if (!deleted) return res.status(404).json({ error: 'Profile not found or not owned by this account' });
   res.json({ success: true });
 });
 

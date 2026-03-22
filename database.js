@@ -16,14 +16,15 @@ if (!fs.existsSync(dataDir)) {
 }
 
 const EMPTY_DB = {
-  users: [],
+  accounts: [],         // Google OAuth accounts (one per Google identity)
+  users: [],            // Learning profiles (can be linked to an account)
   sessions: [],
   progress: [],
   vocabulary: [],
   streaks: [],
   activityLog: [],
   content: {},          // LLM-generated content cache  { cacheKey: { ...lesson, _cachedAt } }
-  _seq: { users: 1, progress: 1, vocabulary: 1, streaks: 1, activityLog: 1 }
+  _seq: { accounts: 1, users: 1, progress: 1, vocabulary: 1, streaks: 1, activityLog: 1 }
 };
 
 class JsonDatabase {
@@ -38,16 +39,54 @@ class JsonDatabase {
       if (fs.existsSync(this.filePath)) {
         const raw = fs.readFileSync(this.filePath, 'utf-8');
         const d = JSON.parse(raw);
-        return {
+        const db = {
           ...EMPTY_DB,
           ...d,
           _seq: { ...EMPTY_DB._seq, ...(d._seq || {}) }
         };
+        // ── migrate legacy Google users to accounts ──────────
+        // Before accounts were introduced, google_id was stored directly on user records.
+        // Promote those users into account records and link them back.
+        const needsSave = this._migrateGoogleUsers(db);
+        if (needsSave) {
+          try {
+            fs.writeFileSync(this.filePath, JSON.stringify(db, null, 2), 'utf-8');
+          } catch (_) { /* ignore write errors during load */ }
+        }
+        return db;
       }
     } catch (e) {
       console.error('[DB] Corrupt file – starting fresh:', e.message);
     }
     return structuredClone(EMPTY_DB);
+  }
+
+  // Migrate users that have google_id set directly to the accounts model.
+  // Returns true if any migration was performed.
+  _migrateGoogleUsers(db) {
+    let migrated = false;
+    for (const user of db.users) {
+      if (user.google_id && !user.account_id) {
+        // Check if account already exists for this google_id
+        let account = db.accounts.find(a => a.google_id === user.google_id);
+        if (!account) {
+          account = {
+            id: db._seq.accounts++,
+            google_id: user.google_id,
+            email: user.email || null,
+            name: user.name,
+            picture: user.picture || null,
+            created_at: user.created_at || new Date().toISOString(),
+            last_login: user.last_login || new Date().toISOString()
+          };
+          db.accounts.push(account);
+        }
+        user.account_id = account.id;
+        // Keep google_id on user for backward compatibility but it is no longer authoritative
+        migrated = true;
+      }
+    }
+    return migrated;
   }
 
   _save() {
@@ -61,7 +100,99 @@ class JsonDatabase {
   }
 
   // ══════════════════════════════════════════════════════════
-  // USERS
+  // ACCOUNTS  (Google OAuth identities)
+  // ══════════════════════════════════════════════════════════
+  getAccountById(id) {
+    return this.data.accounts.find(a => a.id === id) || null;
+  }
+
+  getAccountByGoogleId(googleId) {
+    if (!googleId) return null;
+    return this.data.accounts.find(a => a.google_id === googleId) || null;
+  }
+
+  getAccountByEmail(email) {
+    if (!email) return null;
+    return this.data.accounts.find(a => (a.email || '').toLowerCase() === email.toLowerCase()) || null;
+  }
+
+  upsertGoogleAccount({ googleId, email, name, picture }) {
+    const now = new Date().toISOString();
+    let account = this.getAccountByGoogleId(googleId);
+
+    if (!account && email) {
+      account = this.getAccountByEmail(email);
+    }
+
+    if (account) {
+      account.google_id = googleId;
+      account.email = email || account.email;
+      account.name = name || account.name;
+      account.picture = picture || account.picture;
+      account.last_login = now;
+      this._save();
+      return account;
+    }
+
+    account = {
+      id: this._nextId('accounts'),
+      google_id: googleId,
+      email: email || null,
+      name: name || email || 'Google User',
+      picture: picture || null,
+      created_at: now,
+      last_login: now
+    };
+    this.data.accounts.push(account);
+    this._save();
+    return account;
+  }
+
+  getProfilesByAccountId(accountId) {
+    return this.data.users
+      .filter(u => u.account_id === accountId)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  createProfile(accountId, name, avatar = '🧒', pin = null) {
+    const user = {
+      id: this._nextId('users'),
+      name,
+      avatar,
+      pin,
+      auth_provider: accountId ? 'google' : 'local',
+      account_id: accountId || null,
+      google_id: null,
+      email: null,
+      picture: null,
+      created_at: new Date().toISOString(),
+      last_login: new Date().toISOString()
+    };
+    this.data.users.push(user);
+
+    this.data.streaks.push({
+      id: this._nextId('streaks'),
+      user_id: user.id,
+      current_streak: 0,
+      longest_streak: 0,
+      total_stars: 0,
+      last_activity_date: null
+    });
+
+    this._save();
+    return user;
+  }
+
+  deleteProfile(profileId, accountId) {
+    const profile = this.getUserById(profileId);
+    if (!profile) return false;
+    if (accountId !== null && profile.account_id !== accountId) return false;
+    this.deleteUser(profileId);
+    return true;
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // USERS  (standalone local profiles + back-compat)
   // ══════════════════════════════════════════════════════════
   getUsers() {
     return [...this.data.users].sort((a, b) => a.name.localeCompare(b.name));
@@ -88,6 +219,7 @@ class JsonDatabase {
       avatar,
       pin,
       auth_provider: extra.authProvider || 'local',
+      account_id: extra.accountId || null,
       google_id: extra.googleId || null,
       email: extra.email || null,
       picture: extra.picture || null,
@@ -154,12 +286,13 @@ class JsonDatabase {
     if (this.data.sessions.length !== before) this._save();
   }
 
-  createSession(userId, ttlMs, provider = 'local') {
+  createSession(userId, ttlMs, provider = 'local', accountId = null) {
     this._purgeExpiredSessions();
     const token = crypto.randomBytes(32).toString('base64url');
     const now = new Date();
     const session = {
       id: crypto.randomBytes(16).toString('hex'),
+      account_id: accountId || null,
       user_id: userId,
       provider,
       token_hash: this._hashSessionToken(token),
@@ -195,6 +328,14 @@ class JsonDatabase {
     const before = this.data.sessions.length;
     this.data.sessions = this.data.sessions.filter(session => session.token_hash !== tokenHash);
     if (this.data.sessions.length !== before) this._save();
+  }
+
+  setSessionProfile(token, userId) {
+    const session = this.getSession(token);
+    if (!session) return null;
+    session.user_id = userId;
+    this._save();
+    return session;
   }
 
   deleteUser(id) {
