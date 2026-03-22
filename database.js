@@ -519,7 +519,8 @@ class JsonDatabase {
       row.provider    = cfg.provider;
       row.llm_url     = cfg.llmUrl     || '';
       row.llm_model   = cfg.llmModel   || '';
-      row.llm_api_key = cfg.llmApiKey  || '';
+      // API key is no longer stored server-side – it lives encrypted in the browser
+      delete row.llm_api_key;
       row.updated_at  = new Date().toISOString();
     } else {
       row = {
@@ -528,7 +529,7 @@ class JsonDatabase {
         provider:    cfg.provider    || '',
         llm_url:     cfg.llmUrl     || '',
         llm_model:   cfg.llmModel   || '',
-        llm_api_key: cfg.llmApiKey  || '',
+        // API key is no longer stored server-side
         created_at:  new Date().toISOString(),
         updated_at:  new Date().toISOString(),
       };

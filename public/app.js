@@ -1,6 +1,77 @@
 // ─── Plataforma de Aprendizagem - Frontend ────────────────
 // SPA com seleção de cursos, geração LLM e explicações de quiz
 
+// ─── Client-side API-key encryption helpers (Web Crypto API) ──
+// The API key never leaves the browser unencrypted. It is stored in
+// localStorage as an AES-GCM ciphertext, protected by a user-chosen PIN.
+// The decrypted key is only held in memory and sent per-request via the
+// X-LLM-Key header over HTTPS.
+const KeyVault = {
+  _PBKDF2_ITERATIONS: 600000,
+
+  // Derive a 256-bit AES-GCM key from a PIN + salt using PBKDF2
+  async _deriveKey(pin, salt) {
+    const enc = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw', enc.encode(pin), 'PBKDF2', false, ['deriveKey']
+    );
+    return crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt, iterations: this._PBKDF2_ITERATIONS, hash: 'SHA-256' },
+      keyMaterial,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+  },
+
+  // Encrypt plaintext → { salt, iv, ciphertext } (all base64)
+  async encrypt(plaintext, pin) {
+    const enc = new TextEncoder();
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv   = crypto.getRandomValues(new Uint8Array(12));
+    const key  = await this._deriveKey(pin, salt);
+    const ct   = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv }, key, enc.encode(plaintext)
+    );
+    return {
+      salt:       this._toBase64(salt),
+      iv:         this._toBase64(iv),
+      ciphertext: this._toBase64(new Uint8Array(ct)),
+    };
+  },
+
+  // Decrypt { salt, iv, ciphertext } → plaintext string
+  async decrypt(blob, pin) {
+    const salt = this._fromBase64(blob.salt);
+    const iv   = this._fromBase64(blob.iv);
+    const ct   = this._fromBase64(blob.ciphertext);
+    const key  = await this._deriveKey(pin, salt);
+    const pt   = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
+    return new TextDecoder().decode(pt);
+  },
+
+  // localStorage helpers — keyed per account
+  _storageKey(accountId) { return `llmKey_${accountId}`; },
+
+  save(accountId, encryptedBlob) {
+    localStorage.setItem(this._storageKey(accountId), JSON.stringify(encryptedBlob));
+  },
+  load(accountId) {
+    const raw = localStorage.getItem(this._storageKey(accountId));
+    return raw ? JSON.parse(raw) : null;
+  },
+  remove(accountId) {
+    localStorage.removeItem(this._storageKey(accountId));
+  },
+  has(accountId) {
+    return localStorage.getItem(this._storageKey(accountId)) !== null;
+  },
+
+  // Base64 encode/decode
+  _toBase64(buf)  { return btoa(String.fromCharCode(...buf)); },
+  _fromBase64(s)  { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); },
+};
+
 const App = {
   // Account (Google OAuth identity)
   accountId: null,
@@ -23,6 +94,8 @@ const App = {
   currentLesson: null,
   quizState: null,
   vocabIndex: 0,
+  // Decrypted API key held in memory for the current session only
+  _llmApiKey: null,
 
   // ─── Inicializar ─────────────────────────────────────────
   async init() {
@@ -35,6 +108,10 @@ const App = {
       }
       if (session.user) {
         this.setCurrentUser(session.user);
+      }
+      // If there is an encrypted API key stored locally, prompt for PIN
+      if (this.hasStoredApiKey()) {
+        await this.ensureApiKeyUnlocked();
       }
       if (session.needsProfileSelection) {
         this.showProfileSelection();
@@ -53,10 +130,15 @@ const App = {
 
   // ─── API Helper ──────────────────────────────────────────
   async api(url, options = {}) {
+    const headers = { 'Content-Type': 'application/json', ...options.headers };
+    // Attach decrypted API key if available (never stored server-side)
+    if (this._llmApiKey) {
+      headers['X-LLM-Key'] = this._llmApiKey;
+    }
     const res = await fetch(url, {
       credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
       ...options,
+      headers,
       body: options.body ? JSON.stringify(options.body) : undefined,
     });
     if (!res.ok) {
@@ -87,6 +169,7 @@ const App = {
     this.accountId = account.id;
     this.accountName = account.name;
     this.accountPicture = account.picture || null;
+    this._llmApiKey = null; // reset on account switch
   },
 
   clearCurrentUser() {
@@ -101,6 +184,71 @@ const App = {
     this.accountId = null;
     this.accountName = null;
     this.accountPicture = null;
+    this._llmApiKey = null;
+  },
+
+  // ─── API Key Vault helpers ──────────────────────────────
+  // Check whether this account has an encrypted key in localStorage
+  hasStoredApiKey() {
+    return this.accountId && KeyVault.has(this.accountId);
+  },
+
+  // Show a modal PIN prompt; resolves with the entered PIN or null if cancelled
+  _promptPin(message) {
+    return new Promise(resolve => {
+      // Remove any existing overlay
+      const old = document.getElementById('pin-overlay');
+      if (old) old.remove();
+
+      const overlay = document.createElement('div');
+      overlay.id = 'pin-overlay';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999';
+      overlay.innerHTML = `
+        <div style="background:var(--card-bg,#fff);border-radius:12px;padding:24px;max-width:360px;width:90%;box-shadow:0 4px 20px rgba(0,0,0,.3)">
+          <h3 style="margin:0 0 8px">🔐 PIN da Chave API</h3>
+          <p style="margin:0 0 16px;font-size:.9em;color:var(--text-muted,#666)">${message}</p>
+          <input id="pin-input" type="password" inputmode="text" placeholder="Insere o teu PIN..."
+                 style="width:100%;padding:10px;border:1px solid var(--border,#ccc);border-radius:8px;font-size:1em;box-sizing:border-box;margin-bottom:12px">
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button id="pin-cancel" style="padding:8px 16px;border:none;border-radius:8px;cursor:pointer;background:var(--bg-muted,#eee)">Cancelar</button>
+            <button id="pin-ok" style="padding:8px 16px;border:none;border-radius:8px;cursor:pointer;background:var(--primary,#4f8cff);color:#fff;font-weight:600">Desbloquear</button>
+          </div>
+          <p id="pin-error" style="color:#e74c3c;font-size:.85em;margin:8px 0 0;display:none"></p>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      const input = document.getElementById('pin-input');
+      const okBtn = document.getElementById('pin-ok');
+      const cancelBtn = document.getElementById('pin-cancel');
+
+      const cleanup = (val) => { overlay.remove(); resolve(val); };
+      cancelBtn.onclick = () => cleanup(null);
+      okBtn.onclick = () => cleanup(input.value);
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') cleanup(input.value); });
+      input.focus();
+    });
+  },
+
+  // Prompt the user for their PIN and unlock the stored key
+  async unlockApiKey() {
+    if (!this.accountId || !KeyVault.has(this.accountId)) return false;
+    const pin = await this._promptPin('Insere o PIN para desbloquear a tua chave API.');
+    if (!pin) return false;
+    try {
+      const blob = KeyVault.load(this.accountId);
+      this._llmApiKey = await KeyVault.decrypt(blob, pin);
+      return true;
+    } catch {
+      alert('❌ PIN incorreto. Tenta novamente nas definições LLM.');
+      return false;
+    }
+  },
+
+  // Ensure the API key is unlocked; returns true if ready, false if not
+  async ensureApiKeyUnlocked() {
+    if (this._llmApiKey) return true;
+    if (!this.hasStoredApiKey()) return true; // no key configured, server default will be used
+    return this.unlockApiKey();
   },
 
   currentUserProfile() {
@@ -2181,6 +2329,13 @@ const App = {
     ).join('');
 
     const courseTitle = this.currentCourse?.titlePt || this.currentCourse?.title || '';
+    const hasLocalKey = this.hasStoredApiKey();
+    const keyUnlocked = Boolean(this._llmApiKey);
+    const keyStatusHtml = hasLocalKey
+      ? (keyUnlocked
+        ? '<span style="color:#27ae60">🔓 Chave desbloqueada para esta sessão</span>'
+        : '<span style="color:#e67e22">🔒 Chave guardada localmente (bloqueada) — <a href="#" onclick="App.unlockApiKeyFromSettings();return false">desbloquear</a></span>')
+      : '';
 
     this.render(`
       <div class="settings-view">
@@ -2227,10 +2382,17 @@ const App = {
             <div class="form-group" id="llmApiKeyGroup">
               <label for="llmApiKey">Chave API</label>
               <div class="input-with-icon">
-                <input type="password" id="llmApiKey" placeholder="${currentCfg.hasApiKey ? '••••••••  (guardada)' : 'Insere a tua chave API...'}" autocomplete="off">
+                <input type="password" id="llmApiKey" placeholder="${hasLocalKey ? '••••••••  (guardada no browser)' : 'Insere a tua chave API...'}" autocomplete="off">
                 <button class="btn-icon-inline" onclick="App.toggleApiKeyVisibility()" title="Mostrar/Esconder">👁️</button>
               </div>
-              <small class="field-hint">A chave API é armazenada de forma segura no servidor.</small>
+              <small class="field-hint">🔐 A chave API é encriptada e guardada apenas no teu browser. Nunca é armazenada no servidor.</small>
+              ${keyStatusHtml ? `<small class="field-hint">${keyStatusHtml}</small>` : ''}
+            </div>
+
+            <div class="form-group" id="llmPinGroup">
+              <label for="llmPin">PIN de proteção</label>
+              <input type="password" id="llmPin" placeholder="${hasLocalKey ? 'PIN atual (para atualizar a chave)' : 'Escolhe um PIN para proteger a chave...'}" inputmode="text" autocomplete="off">
+              <small class="field-hint">O PIN encripta a tua chave API. Precisarás dele em cada sessão.</small>
             </div>
 
             <div class="form-group">
@@ -2300,8 +2462,10 @@ const App = {
       urlHint.textContent = preset.urlPlaceholder ? `Exemplo: ${preset.urlPlaceholder}` : '';
     }
 
-    // Show/hide API key field
+    // Show/hide API key field and PIN field
     apiKeyGroup.style.display = preset.requiresApiKey ? 'block' : 'none';
+    const pinGroup = document.getElementById('llmPinGroup');
+    if (pinGroup) pinGroup.style.display = preset.requiresApiKey ? 'block' : 'none';
 
     // Update model suggestions
     const datalist = document.getElementById('modelSuggestions');
@@ -2330,20 +2494,24 @@ const App = {
     result.style.display = 'none';
 
     try {
-      const apiKeyInput = document.getElementById('llmApiKey')?.value;
+      // Use the freshly-typed key for testing, or the already-unlocked one
+      const apiKeyInput = document.getElementById('llmApiKey')?.value || this._llmApiKey || '';
       const body = {
         provider,
         llmUrl: document.getElementById('llmUrl')?.value || '',
         llmModel: document.getElementById('llmModel')?.value || '',
       };
-      // Only send API key if user typed a new one
+
+      // Send API key via header, not body
+      const extraHeaders = {};
       if (apiKeyInput) {
-        body.llmApiKey = apiKeyInput;
+        extraHeaders['X-LLM-Key'] = apiKeyInput;
       }
 
       const res = await this.api(`/api/accounts/${this.accountId}/llm-config/test`, {
         method: 'POST',
         body,
+        headers: extraHeaders,
       });
 
       result.style.display = 'block';
@@ -2373,15 +2541,34 @@ const App = {
       return;
     }
 
+    const apiKeyInput = document.getElementById('llmApiKey')?.value || '';
+    const pinInput    = document.getElementById('llmPin')?.value || '';
+    const preset = (this._llmProviders || []).find(p => p.id === provider);
+    const needsKey = preset?.requiresApiKey;
+
+    // If user typed a new API key, require a PIN to encrypt it
+    if (apiKeyInput && needsKey) {
+      if (!pinInput) {
+        alert('⚠️ Insere um PIN para proteger a tua chave API.');
+        document.getElementById('llmPin')?.focus();
+        return;
+      }
+      try {
+        const blob = await KeyVault.encrypt(apiKeyInput, pinInput);
+        KeyVault.save(this.accountId, blob);
+        this._llmApiKey = apiKeyInput; // keep in memory for the session
+      } catch (err) {
+        alert('❌ Erro ao encriptar a chave: ' + err.message);
+        return;
+      }
+    }
+
+    // Save provider/URL/model to the server (no API key!)
     const body = {
       provider,
       llmUrl: document.getElementById('llmUrl')?.value || '',
       llmModel: document.getElementById('llmModel')?.value || '',
     };
-    const apiKeyInput = document.getElementById('llmApiKey')?.value;
-    if (apiKeyInput) {
-      body.llmApiKey = apiKeyInput;
-    }
 
     try {
       await this.api(`/api/accounts/${this.accountId}/llm-config`, {
@@ -2395,10 +2582,19 @@ const App = {
     }
   },
 
+  // Unlock API key from the settings page
+  async unlockApiKeyFromSettings() {
+    const ok = await this.unlockApiKey();
+    if (ok) this.showLlmSettings(); // refresh to show updated status
+  },
+
   async resetLlmConfig() {
     if (!confirm('Tens a certeza que queres remover a configuração personalizada e usar a predefinição do servidor?')) return;
     try {
       await this.api(`/api/accounts/${this.accountId}/llm-config`, { method: 'DELETE' });
+      // Also remove the locally stored encrypted key
+      KeyVault.remove(this.accountId);
+      this._llmApiKey = null;
       alert('✅ Configuração removida. A usar predefinição do servidor.');
       this.showLlmSettings();
     } catch (err) {

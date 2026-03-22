@@ -181,15 +181,17 @@ function requireSameUser(req, res, next) {
 }
 
 // Build LLM overrides from the authenticated account's saved LLM config (if any)
+// The API key is never stored server-side; the browser sends it via X-LLM-Key header.
 function getLlmOverrides(req) {
   if (!req.authAccount) return undefined;
   const cfg = db.getAccountLlmConfig(req.authAccount.id);
   if (!cfg || !cfg.provider) return undefined;
+  const llmApiKey = req.headers['x-llm-key'] || undefined;
   return {
     provider: cfg.provider,
     llmUrl:   cfg.llm_url   || undefined,
     llmModel: cfg.llm_model || undefined,
-    llmApiKey: cfg.llm_api_key || undefined,
+    llmApiKey,
   };
 }
 
@@ -612,7 +614,6 @@ app.get('/api/accounts/:id/llm-config', requireAccountAuth, (req, res) => {
       provider: '',
       llmUrl: '',
       llmModel: '',
-      hasApiKey: false,
       usingDefault: true,
     });
   }
@@ -620,17 +621,17 @@ app.get('/api/accounts/:id/llm-config', requireAccountAuth, (req, res) => {
     provider: cfg.provider || '',
     llmUrl: cfg.llm_url || '',
     llmModel: cfg.llm_model || '',
-    hasApiKey: Boolean(cfg.llm_api_key),
     usingDefault: false,
   });
 });
 
 // Save/update account's LLM configuration
+// The API key is NOT saved server-side; it is encrypted and stored in the browser.
 app.put('/api/accounts/:id/llm-config', requireAccountAuth, (req, res) => {
   if (req.authAccount.id !== Number(req.params.id)) {
     return res.status(403).json({ error: 'Forbidden' });
   }
-  const { provider, llmUrl, llmModel, llmApiKey } = req.body;
+  const { provider, llmUrl, llmModel } = req.body;
   if (!provider) {
     return res.status(400).json({ error: 'Provider is required' });
   }
@@ -642,14 +643,12 @@ app.put('/api/accounts/:id/llm-config', requireAccountAuth, (req, res) => {
     provider,
     llmUrl: llmUrl || '',
     llmModel: llmModel || '',
-    llmApiKey: llmApiKey || '',
   });
 
   res.json({
     provider: row.provider,
     llmUrl: row.llm_url,
     llmModel: row.llm_model,
-    hasApiKey: Boolean(row.llm_api_key),
     usingDefault: false,
   });
 });
@@ -664,11 +663,13 @@ app.delete('/api/accounts/:id/llm-config', requireAccountAuth, (req, res) => {
 });
 
 // Test an LLM connection (does not save)
+// API key comes from X-LLM-Key header (client-side encrypted storage)
 app.post('/api/accounts/:id/llm-config/test', requireAccountAuth, async (req, res) => {
   if (req.authAccount.id !== Number(req.params.id)) {
     return res.status(403).json({ error: 'Forbidden' });
   }
-  const { provider, llmUrl, llmModel, llmApiKey } = req.body;
+  const { provider, llmUrl, llmModel } = req.body;
+  const llmApiKey = req.headers['x-llm-key'] || undefined;
   if (!provider) {
     return res.status(400).json({ error: 'Provider is required' });
   }
