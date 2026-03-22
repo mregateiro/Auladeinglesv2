@@ -7,6 +7,7 @@ const { OAuth2Client } = require('google-auth-library');
 const config       = require('./config');
 const db           = require('./database');
 const llm          = require('./llm');
+const { PROVIDERS } = require('./llm');
 const generator    = require('./generator');
 
 const app  = express();
@@ -177,6 +178,19 @@ function requireSameUser(req, res, next) {
     return res.status(403).json({ error: 'Forbidden' });
   }
   next();
+}
+
+// Build LLM overrides from the authenticated account's saved LLM config (if any)
+function getLlmOverrides(req) {
+  if (!req.authAccount) return undefined;
+  const cfg = db.getAccountLlmConfig(req.authAccount.id);
+  if (!cfg || !cfg.provider) return undefined;
+  return {
+    provider: cfg.provider,
+    llmUrl:   cfg.llm_url   || undefined,
+    llmModel: cfg.llm_model || undefined,
+    llmApiKey: cfg.llm_api_key || undefined,
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -461,7 +475,7 @@ app.get('/api/courses/:courseId/modules/:moduleId/lessons/:lessonId', async (req
     const mod = getModule(course, req.params.moduleId);
     if (!mod) return res.status(404).json({ error: 'Module not found' });
 
-    const lesson = await generator.getLesson(course, mod, req.params.lessonId);
+    const lesson = await generator.getLesson(course, mod, req.params.lessonId, getLlmOverrides(req));
     res.json(lesson);
   } catch (err) {
     console.error('[GENERATE]', err.message);
@@ -492,7 +506,7 @@ app.post('/api/courses/:courseId/modules/:moduleId/lessons/:lessonId/regenerate'
       db.clearContent(`speak:${course.id}:${mod.id}:${speakMatch[2]}`);
     }
 
-    const lesson = await generator.getLesson(course, mod, lessonId);
+    const lesson = await generator.getLesson(course, mod, lessonId, getLlmOverrides(req));
     res.json(lesson);
   } catch (err) {
     console.error('[REGENERATE]', err.message);
@@ -567,6 +581,104 @@ app.post('/api/vocabulary', (req, res) => {
 
 app.get('/api/users/:id/vocabulary', requireSameUser, (req, res) => {
   res.json(db.getVocabulary(Number(req.params.id)));
+});
+
+// ═══════════════════════════════════════════════════════════════
+// LLM PROVIDER CONFIGURATION API  (per-account)
+// ═══════════════════════════════════════════════════════════════
+
+// List available LLM providers and their presets
+app.get('/api/llm-providers', (req, res) => {
+  const providers = Object.entries(PROVIDERS).map(([key, p]) => ({
+    id: key,
+    label: p.label,
+    apiType: p.apiType,
+    defaultUrl: p.url,
+    models: p.models,
+    requiresApiKey: key !== 'ollama' && key !== 'lmstudio',
+    urlPlaceholder: p.urlPlaceholder || p.url || '',
+  }));
+  res.json(providers);
+});
+
+// Get current account's LLM configuration
+app.get('/api/accounts/:id/llm-config', requireAccountAuth, (req, res) => {
+  if (req.authAccount.id !== Number(req.params.id)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const cfg = db.getAccountLlmConfig(req.authAccount.id);
+  if (!cfg) {
+    return res.json({
+      provider: '',
+      llmUrl: '',
+      llmModel: '',
+      hasApiKey: false,
+      usingDefault: true,
+    });
+  }
+  res.json({
+    provider: cfg.provider || '',
+    llmUrl: cfg.llm_url || '',
+    llmModel: cfg.llm_model || '',
+    hasApiKey: Boolean(cfg.llm_api_key),
+    usingDefault: false,
+  });
+});
+
+// Save/update account's LLM configuration
+app.put('/api/accounts/:id/llm-config', requireAccountAuth, (req, res) => {
+  if (req.authAccount.id !== Number(req.params.id)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const { provider, llmUrl, llmModel, llmApiKey } = req.body;
+  if (!provider) {
+    return res.status(400).json({ error: 'Provider is required' });
+  }
+  if (!PROVIDERS[provider]) {
+    return res.status(400).json({ error: 'Unknown provider' });
+  }
+
+  const row = db.saveAccountLlmConfig(req.authAccount.id, {
+    provider,
+    llmUrl: llmUrl || '',
+    llmModel: llmModel || '',
+    llmApiKey: llmApiKey || '',
+  });
+
+  res.json({
+    provider: row.provider,
+    llmUrl: row.llm_url,
+    llmModel: row.llm_model,
+    hasApiKey: Boolean(row.llm_api_key),
+    usingDefault: false,
+  });
+});
+
+// Delete account's LLM configuration (revert to server default)
+app.delete('/api/accounts/:id/llm-config', requireAccountAuth, (req, res) => {
+  if (req.authAccount.id !== Number(req.params.id)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  db.deleteAccountLlmConfig(req.authAccount.id);
+  res.json({ success: true, usingDefault: true });
+});
+
+// Test an LLM connection (does not save)
+app.post('/api/accounts/:id/llm-config/test', requireAccountAuth, async (req, res) => {
+  if (req.authAccount.id !== Number(req.params.id)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const { provider, llmUrl, llmModel, llmApiKey } = req.body;
+  if (!provider) {
+    return res.status(400).json({ error: 'Provider is required' });
+  }
+
+  try {
+    const result = await llm.ping({ provider, llmUrl, llmModel, llmApiKey });
+    res.json(result);
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════

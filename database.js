@@ -24,7 +24,8 @@ const EMPTY_DB = {
   streaks: [],
   activityLog: [],
   content: {},          // LLM-generated content cache  { cacheKey: { ...lesson, _cachedAt } }
-  _seq: { accounts: 1, users: 1, progress: 1, vocabulary: 1, streaks: 1, activityLog: 1 }
+  llmConfigs: [],       // Per-account LLM provider settings  { account_id, provider, ... }
+  _seq: { accounts: 1, users: 1, progress: 1, vocabulary: 1, streaks: 1, activityLog: 1, llmConfigs: 1 }
 };
 
 class JsonDatabase {
@@ -499,6 +500,47 @@ class JsonDatabase {
     } else {
       this.data.content = {};
     }
+    this._save();
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // LLM CONFIGS  (per-account provider settings)
+  // ══════════════════════════════════════════════════════════
+  getAccountLlmConfig(accountId) {
+    if (!accountId) return null;
+    if (!this.data.llmConfigs) this.data.llmConfigs = [];
+    return this.data.llmConfigs.find(c => c.account_id === accountId) || null;
+  }
+
+  saveAccountLlmConfig(accountId, cfg) {
+    if (!this.data.llmConfigs) this.data.llmConfigs = [];
+    let row = this.data.llmConfigs.find(c => c.account_id === accountId);
+    if (row) {
+      row.provider    = cfg.provider;
+      row.llm_url     = cfg.llmUrl     || '';
+      row.llm_model   = cfg.llmModel   || '';
+      row.llm_api_key = cfg.llmApiKey  || '';
+      row.updated_at  = new Date().toISOString();
+    } else {
+      row = {
+        id: this._nextId('llmConfigs'),
+        account_id: accountId,
+        provider:    cfg.provider    || '',
+        llm_url:     cfg.llmUrl     || '',
+        llm_model:   cfg.llmModel   || '',
+        llm_api_key: cfg.llmApiKey  || '',
+        created_at:  new Date().toISOString(),
+        updated_at:  new Date().toISOString(),
+      };
+      this.data.llmConfigs.push(row);
+    }
+    this._save();
+    return row;
+  }
+
+  deleteAccountLlmConfig(accountId) {
+    if (!this.data.llmConfigs) return;
+    this.data.llmConfigs = this.data.llmConfigs.filter(c => c.account_id !== accountId);
     this._save();
   }
 }
