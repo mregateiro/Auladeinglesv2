@@ -99,13 +99,16 @@ const App = {
 
   // ─── Inicializar ─────────────────────────────────────────
   async init() {
-    await this.loadAuthConfig();
+    // In standalone mode, Google is not available
+    this.googleEnabled = false;
+    this.googleClientId = null;
+
+    // Set a default local account so LLM settings work
+    this.accountId = 1;
+    this.accountName = 'Local';
 
     try {
       const session = await this.api('/api/auth/session');
-      if (session.account) {
-        this.setCurrentAccount(session.account);
-      }
       if (session.user) {
         this.setCurrentUser(session.user);
       }
@@ -113,39 +116,25 @@ const App = {
       if (this.hasStoredApiKey()) {
         await this.ensureApiKeyUnlocked();
       }
-      if (session.needsProfileSelection) {
-        this.showProfileSelection();
-        return;
-      }
       if (session.user) {
         this.showCourseSelection();
         return;
       }
     } catch (e) {
-      console.error('Sessão anterior não restaurada:', e.message);
+      // No active session — show user selection
     }
 
     this.showUserSelection();
   },
 
-  // ─── API Helper ──────────────────────────────────────────
+  // ─── API Helper (local mode — no server needed) ──────────
   async api(url, options = {}) {
-    const headers = { 'Content-Type': 'application/json', ...options.headers };
-    // Attach decrypted API key if available (never stored server-side)
+    const headers = { ...options.headers };
+    // Attach decrypted API key if available
     if (this._llmApiKey) {
       headers['X-LLM-Key'] = this._llmApiKey;
     }
-    const res = await fetch(url, {
-      credentials: 'same-origin',
-      ...options,
-      headers,
-      body: options.body ? JSON.stringify(options.body) : undefined,
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Pedido falhou' }));
-      throw new Error(err.error || 'Pedido falhou');
-    }
-    return res.json();
+    return LocalAPI.handle(url, { ...options, headers });
   },
 
   escapeHtml(value) {
@@ -405,8 +394,9 @@ const App = {
   async showUserSelection() {
     this.currentView = 'users';
     this.clearCurrentUser();
-    this.clearCurrentAccount();
     this.currentCourse = null;
+    // Keep accountId for LLM settings
+    this.accountId = 1;
 
     let users = [];
     try {
@@ -415,11 +405,8 @@ const App = {
       console.error('Falha ao carregar utilizadores:', e);
     }
 
-    // Only show local (non-account) profiles on this screen
-    const localUsers = users.filter(u => !u.accountId);
-
-    const usersHtml = localUsers.map(u => `
-      <div class="user-card" onclick="App.loginUser(${u.id}, ${u.pin ? 'true' : 'false'})">
+    const usersHtml = users.map(u => `
+      <div class="user-card" onclick="App.loginUser(${u.id}, ${u.hasPin ? 'true' : 'false'})">
         <button class="delete-btn" onclick="event.stopPropagation(); App.deleteUser(${u.id}, '${u.name}')" title="Apagar">🗑️</button>
         <span class="avatar">${u.avatar}</span>
         <div class="name">${u.name}</div>
@@ -427,20 +414,12 @@ const App = {
       </div>
     `).join('');
 
-    const googleSection = this.googleEnabled ? `
-      <div class="google-login-section">
-        <p class="google-login-label">Entrar com conta Google para gerir perfis</p>
-        <div id="googleLoginButton"></div>
-      </div>
-    ` : '';
-
     this.render(`
       <div class="user-selection">
         <div class="header">
           <h1>🎓 Plataforma de Aprendizagem</h1>
           <p>Quem vai aprender hoje?</p>
         </div>
-        ${googleSection}
         <div class="users-grid">
           ${usersHtml}
           <div class="user-card add-user-card" onclick="App.showCreateUserModal()">
@@ -448,12 +427,11 @@ const App = {
             <span>Novo Aluno</span>
           </div>
         </div>
+        <div style="text-align: center; margin-top: 20px;">
+          <button class="btn btn-secondary" onclick="App.showLlmSettings()">⚙️ Configuração IA</button>
+        </div>
       </div>
     `);
-
-    if (this.googleEnabled) {
-      setTimeout(() => this.renderGoogleButton(), 100);
-    }
   },
 
   // ═══════════════════════════════════════════════════════════
@@ -732,6 +710,8 @@ const App = {
       this.userId = user.id;
       this.userName = user.name;
       this.userAvatar = user.avatar;
+      // Ensure accountId is set for LLM settings
+      this.accountId = 1;
       this.showCourseSelection();
     } catch (err) {
       alert('Erro: ' + err.message);
@@ -782,6 +762,7 @@ const App = {
       this.userId = user.id;
       this.userName = user.name;
       this.userAvatar = user.avatar;
+      this.accountId = 1;
       document.querySelector('.modal-overlay')?.remove();
       this.showCourseSelection();
     } catch (err) {
@@ -931,13 +912,10 @@ const App = {
   // ─── Terminar Sessão ─────────────────────────────────────
   async logout() {
     await this.api('/api/logout', { method: 'POST' }).catch(() => {});
-    document.cookie = 'userId=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
     this.clearCurrentUser();
-    this.clearCurrentAccount();
     this.currentCourse = null;
-    if (window.google?.accounts?.id) {
-      window.google.accounts.id.disableAutoSelect();
-    }
+    // Keep accountId=1 so LLM settings still accessible
+    this.accountId = 1;
     this.showUserSelection();
   },
 
@@ -2304,10 +2282,9 @@ const App = {
   async showLlmSettings() {
     this.currentView = 'llmSettings';
 
+    // In standalone mode, account is always available (local account = 1)
     if (!this.accountId) {
-      alert('Precisas de iniciar sessão com Google para configurar o LLM.');
-      this.showCourseSelection();
-      return;
+      this.accountId = 1;
     }
 
     let providers = [];
@@ -2340,7 +2317,7 @@ const App = {
     this.render(`
       <div class="settings-view">
         <div class="top-bar">
-          <button class="back-btn" onclick="App.showDashboard ? App.showDashboard() : App.showCourseSelection()">← Voltar</button>
+          <button class="back-btn" onclick="App.userId ? App.showDashboard() : App.showUserSelection()">← Voltar</button>
           <div class="user-info">
             <span class="user-avatar">${this.userAvatar || '👤'}</span>
             <span>${this.userName || this.accountName || ''}</span>
@@ -2361,13 +2338,13 @@ const App = {
           <h2>🤖 Provedor de IA</h2>
           <p class="settings-desc">
             Configura o provedor de IA usado para gerar lições.
-            ${currentCfg.usingDefault ? '<span class="badge-default">A usar predefinição do servidor</span>' : '<span class="badge-custom">Configuração personalizada</span>'}
+            ${currentCfg.usingDefault ? '<span class="badge-default">Sem configuração (configura um provedor de IA)</span>' : '<span class="badge-custom">Configuração personalizada</span>'}
           </p>
 
           <div class="form-group">
             <label for="llmProvider">Provedor</label>
             <select id="llmProvider" class="settings-select" onchange="App.onProviderChange()">
-              <option value="">— Usar predefinição do servidor —</option>
+              <option value="">— Escolhe um provedor de IA —</option>
               ${providerOptions}
             </select>
           </div>
@@ -2420,7 +2397,7 @@ const App = {
             <button class="btn btn-small btn-danger" onclick="App.resetLlmConfig()">
               🗑️ Remover configuração personalizada
             </button>
-            <small>Volta a usar a predefinição do servidor</small>
+            <small>Remove a configuração personalizada</small>
           </div>` : ''}
         </div>
       </div>
@@ -2563,7 +2540,7 @@ const App = {
       }
     }
 
-    // Save provider/URL/model to the server (no API key!)
+    // Save provider/URL/model locally (no API key in storage!)
     const body = {
       provider,
       llmUrl: document.getElementById('llmUrl')?.value || '',
@@ -2589,13 +2566,13 @@ const App = {
   },
 
   async resetLlmConfig() {
-    if (!confirm('Tens a certeza que queres remover a configuração personalizada e usar a predefinição do servidor?')) return;
+    if (!confirm('Tens a certeza que queres remover a configuração personalizada?')) return;
     try {
       await this.api(`/api/accounts/${this.accountId}/llm-config`, { method: 'DELETE' });
       // Also remove the locally stored encrypted key
       KeyVault.remove(this.accountId);
       this._llmApiKey = null;
-      alert('✅ Configuração removida. A usar predefinição do servidor.');
+      alert('✅ Configuração removida.');
       this.showLlmSettings();
     } catch (err) {
       alert('❌ Erro: ' + err.message);

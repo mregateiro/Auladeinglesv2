@@ -1,0 +1,11 @@
+{
+  "appId": "com.auladeingles.app",
+  "appName": "Aula de Inglês",
+  "webDir": "public",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}
