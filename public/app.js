@@ -344,7 +344,10 @@ const App = {
             ${accountPicHtml}
             <div>
               <div class="account-name">${this.escapeHtml(this.accountName || 'Conta Google')}</div>
-              <button class="btn-link" onclick="App.logoutAccount()">Trocar conta</button>
+              <div class="account-actions">
+                <button class="btn-link" onclick="App.logoutAccount()">Trocar conta</button>
+                <button class="btn-link" onclick="App.showLlmSettings()">⚙️ Config. IA</button>
+              </div>
             </div>
           </div>
           <h2>Escolhe o teu perfil</h2>
@@ -681,6 +684,7 @@ const App = {
             </div>
           </div>
           <div class="top-bar-right">
+            ${this.accountId ? '<button class="btn-icon" onclick="App.showLlmSettings()" title="Configuração LLM">⚙️</button>' : ''}
             <button class="btn-icon" onclick="App.logout()" title="Sair">🚪</button>
           </div>
         </div>
@@ -753,6 +757,7 @@ const App = {
             <div class="stars-badge">⭐ ${stats.streak?.total_stars || 0}</div>
             <button class="btn-icon" onclick="App.showStats()" title="Estatísticas">📊</button>
             <button class="btn-icon" onclick="App.showVocabReview()" title="Vocabulário">📚</button>
+            ${this.accountId ? '<button class="btn-icon" onclick="App.showLlmSettings()" title="Configuração LLM">⚙️</button>' : ''}
             ${this.courses.length > 1 ? '<button class="btn-icon" onclick="App.showCourseSelection()" title="Mudar Curso">🔄</button>' : ''}
             <button class="btn-icon" onclick="App.logout()" title="Sair">🚪</button>
           </div>
@@ -2143,6 +2148,262 @@ const App = {
         </div>
       </div>
     `);
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  // CONFIGURAÇÃO LLM (por conta)
+  // ═══════════════════════════════════════════════════════════
+  async showLlmSettings() {
+    this.currentView = 'llmSettings';
+
+    if (!this.accountId) {
+      alert('Precisas de iniciar sessão com Google para configurar o LLM.');
+      this.showCourseSelection();
+      return;
+    }
+
+    let providers = [];
+    let currentCfg = {};
+    try {
+      [providers, currentCfg] = await Promise.all([
+        this.api('/api/llm-providers'),
+        this.api(`/api/accounts/${this.accountId}/llm-config`),
+      ]);
+    } catch (e) {
+      console.error('Falha ao carregar configuração LLM:', e);
+    }
+
+    this._llmProviders = providers;
+    this._llmCurrentCfg = currentCfg;
+
+    const providerOptions = providers.map(p =>
+      `<option value="${p.id}" ${currentCfg.provider === p.id ? 'selected' : ''}>${this.escapeHtml(p.label)}</option>`
+    ).join('');
+
+    const courseTitle = this.currentCourse?.titlePt || this.currentCourse?.title || '';
+
+    this.render(`
+      <div class="settings-view">
+        <div class="top-bar">
+          <button class="back-btn" onclick="App.showDashboard ? App.showDashboard() : App.showCourseSelection()">← Voltar</button>
+          <div class="user-info">
+            <span class="user-avatar">${this.userAvatar || '👤'}</span>
+            <span>${this.userName || this.accountName || ''}</span>
+          </div>
+        </div>
+
+        ${courseTitle ? `
+        <div class="breadcrumb">
+          <a onclick="App.showCourseSelection()">Cursos</a> ›
+          <a onclick="App.showDashboard()">${courseTitle}</a> ›
+          <strong>Configuração LLM</strong>
+        </div>` : `
+        <div class="breadcrumb">
+          <strong>Configuração LLM</strong>
+        </div>`}
+
+        <div class="settings-card">
+          <h2>🤖 Provedor de IA</h2>
+          <p class="settings-desc">
+            Configura o provedor de IA usado para gerar lições.
+            ${currentCfg.usingDefault ? '<span class="badge-default">A usar predefinição do servidor</span>' : '<span class="badge-custom">Configuração personalizada</span>'}
+          </p>
+
+          <div class="form-group">
+            <label for="llmProvider">Provedor</label>
+            <select id="llmProvider" class="settings-select" onchange="App.onProviderChange()">
+              <option value="">— Usar predefinição do servidor —</option>
+              ${providerOptions}
+            </select>
+          </div>
+
+          <div id="llmConfigFields" style="display: ${currentCfg.provider ? 'block' : 'none'}">
+            <div class="form-group" id="llmUrlGroup">
+              <label for="llmUrl">URL do API</label>
+              <input type="text" id="llmUrl" placeholder="https://api.example.com/v1" value="${this.escapeHtml(currentCfg.llmUrl || '')}">
+              <small class="field-hint" id="llmUrlHint"></small>
+            </div>
+
+            <div class="form-group" id="llmApiKeyGroup">
+              <label for="llmApiKey">Chave API</label>
+              <div class="input-with-icon">
+                <input type="password" id="llmApiKey" placeholder="${currentCfg.hasApiKey ? '••••••••  (guardada)' : 'Insere a tua chave API...'}" autocomplete="off">
+                <button class="btn-icon-inline" onclick="App.toggleApiKeyVisibility()" title="Mostrar/Esconder">👁️</button>
+              </div>
+              <small class="field-hint">A chave API é armazenada de forma segura no servidor.</small>
+            </div>
+
+            <div class="form-group">
+              <label for="llmModel">Modelo</label>
+              <div class="model-input-group">
+                <input type="text" id="llmModel" placeholder="Nome do modelo..." value="${this.escapeHtml(currentCfg.llmModel || '')}" list="modelSuggestions">
+                <datalist id="modelSuggestions"></datalist>
+              </div>
+            </div>
+
+            <div class="settings-actions">
+              <button class="btn btn-secondary" onclick="App.testLlmConnection()" id="testBtn">
+                🔌 Testar Ligação
+              </button>
+              <button class="btn btn-primary" onclick="App.saveLlmConfig()">
+                💾 Guardar
+              </button>
+            </div>
+
+            <div id="testResult" class="test-result" style="display:none"></div>
+          </div>
+
+          ${!currentCfg.usingDefault ? `
+          <div class="settings-reset">
+            <button class="btn btn-small btn-danger" onclick="App.resetLlmConfig()">
+              🗑️ Remover configuração personalizada
+            </button>
+            <small>Volta a usar a predefinição do servidor</small>
+          </div>` : ''}
+        </div>
+      </div>
+    `);
+
+    // Trigger initial provider field update
+    this.onProviderChange();
+  },
+
+  onProviderChange() {
+    const select = document.getElementById('llmProvider');
+    const fields = document.getElementById('llmConfigFields');
+    const provider = select?.value || '';
+
+    if (!provider) {
+      fields.style.display = 'none';
+      return;
+    }
+    fields.style.display = 'block';
+
+    const preset = (this._llmProviders || []).find(p => p.id === provider);
+    if (!preset) return;
+
+    // Update URL field
+    const urlInput = document.getElementById('llmUrl');
+    const urlHint = document.getElementById('llmUrlHint');
+    const urlGroup = document.getElementById('llmUrlGroup');
+    const apiKeyGroup = document.getElementById('llmApiKeyGroup');
+
+    // Pre-fill URL if empty or different provider selected
+    if (!urlInput.value || (this._llmCurrentCfg.provider !== provider)) {
+      urlInput.value = preset.defaultUrl || '';
+    }
+    urlInput.placeholder = preset.urlPlaceholder || preset.defaultUrl || 'URL do API...';
+
+    if (preset.defaultUrl && provider !== 'custom' && provider !== 'azure') {
+      urlHint.textContent = `Predefinição: ${preset.defaultUrl}`;
+    } else {
+      urlHint.textContent = preset.urlPlaceholder ? `Exemplo: ${preset.urlPlaceholder}` : '';
+    }
+
+    // Show/hide API key field
+    apiKeyGroup.style.display = preset.requiresApiKey ? 'block' : 'none';
+
+    // Update model suggestions
+    const datalist = document.getElementById('modelSuggestions');
+    datalist.innerHTML = preset.models.map(m => `<option value="${m}">`).join('');
+
+    // Pre-fill model if empty
+    const modelInput = document.getElementById('llmModel');
+    if (!modelInput.value && preset.models.length > 0) {
+      modelInput.value = preset.models[0];
+    }
+  },
+
+  toggleApiKeyVisibility() {
+    const input = document.getElementById('llmApiKey');
+    if (input) input.type = input.type === 'password' ? 'text' : 'password';
+  },
+
+  async testLlmConnection() {
+    const provider = document.getElementById('llmProvider')?.value;
+    if (!provider) return;
+
+    const btn = document.getElementById('testBtn');
+    const result = document.getElementById('testResult');
+    btn.disabled = true;
+    btn.textContent = '⏳ A testar...';
+    result.style.display = 'none';
+
+    try {
+      const apiKeyInput = document.getElementById('llmApiKey')?.value;
+      const body = {
+        provider,
+        llmUrl: document.getElementById('llmUrl')?.value || '',
+        llmModel: document.getElementById('llmModel')?.value || '',
+      };
+      // Only send API key if user typed a new one
+      if (apiKeyInput) {
+        body.llmApiKey = apiKeyInput;
+      }
+
+      const res = await this.api(`/api/accounts/${this.accountId}/llm-config/test`, {
+        method: 'POST',
+        body,
+      });
+
+      result.style.display = 'block';
+      if (res.ok) {
+        result.className = 'test-result test-success';
+        result.innerHTML = '✅ Ligação bem sucedida!' +
+          (res.models ? `<br><small>Modelos disponíveis: ${res.models.slice(0, 5).join(', ')}${res.models.length > 5 ? '...' : ''}</small>` : '');
+      } else {
+        result.className = 'test-result test-fail';
+        result.innerHTML = `❌ Falha na ligação: ${this.escapeHtml(res.error || 'Erro desconhecido')}`;
+      }
+    } catch (err) {
+      result.style.display = 'block';
+      result.className = 'test-result test-fail';
+      result.innerHTML = `❌ Erro: ${this.escapeHtml(err.message)}`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🔌 Testar Ligação';
+    }
+  },
+
+  async saveLlmConfig() {
+    const provider = document.getElementById('llmProvider')?.value;
+    if (!provider) {
+      // User selected default, reset config
+      await this.resetLlmConfig();
+      return;
+    }
+
+    const body = {
+      provider,
+      llmUrl: document.getElementById('llmUrl')?.value || '',
+      llmModel: document.getElementById('llmModel')?.value || '',
+    };
+    const apiKeyInput = document.getElementById('llmApiKey')?.value;
+    if (apiKeyInput) {
+      body.llmApiKey = apiKeyInput;
+    }
+
+    try {
+      await this.api(`/api/accounts/${this.accountId}/llm-config`, {
+        method: 'PUT',
+        body,
+      });
+      alert('✅ Configuração LLM guardada com sucesso!');
+      this.showLlmSettings();
+    } catch (err) {
+      alert('❌ Erro ao guardar: ' + err.message);
+    }
+  },
+
+  async resetLlmConfig() {
+    if (!confirm('Tens a certeza que queres remover a configuração personalizada e usar a predefinição do servidor?')) return;
+    try {
+      await this.api(`/api/accounts/${this.accountId}/llm-config`, { method: 'DELETE' });
+      alert('✅ Configuração removida. A usar predefinição do servidor.');
+      this.showLlmSettings();
+    } catch (err) {
+      alert('❌ Erro: ' + err.message);
+    }
   }
 };
 
