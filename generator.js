@@ -21,7 +21,7 @@ CRITICAL TRANSLATION RULES:
 // ═══════════════════════════════════════════════════════════════
 // Generate a vocabulary/flashcard lesson for a topic
 // ═══════════════════════════════════════════════════════════════
-async function generateVocabulary(course, module, topicIndex) {
+async function generateVocabulary(course, module, topicIndex, llmOverrides) {
   const topic = module.topics[topicIndex];
   const cacheKey = `vocab:${course.id}:${module.id}:${topicIndex}`;
 
@@ -33,7 +33,7 @@ async function generateVocabulary(course, module, topicIndex) {
   const content = await llm.chatJSON([
     { role: 'system', content: SYSTEM_PROMPT },
     { role: 'user',   content: prompt }
-  ]);
+  ], { overrides: llmOverrides });
 
   // Validate structure
   if (!content.words || !Array.isArray(content.words) || content.words.length === 0) {
@@ -63,7 +63,7 @@ async function generateVocabulary(course, module, topicIndex) {
 // ═══════════════════════════════════════════════════════════════
 // Generate a quiz for a module (covers all its topics)
 // ═══════════════════════════════════════════════════════════════
-async function generateQuiz(course, module, variant = 0) {
+async function generateQuiz(course, module, variant = 0, llmOverrides) {
   const cacheKey = `quiz:${course.id}:${module.id}:${variant}`;
 
   const cached = db.getContent(cacheKey);
@@ -73,7 +73,7 @@ async function generateQuiz(course, module, variant = 0) {
   const content = await llm.chatJSON([
     { role: 'system', content: SYSTEM_PROMPT },
     { role: 'user',   content: prompt }
-  ]);
+  ], { overrides: llmOverrides });
 
   if (!content.questions || !Array.isArray(content.questions) || content.questions.length === 0) {
     throw new Error('LLM returned invalid quiz structure');
@@ -103,7 +103,7 @@ async function generateQuiz(course, module, variant = 0) {
 // ═══════════════════════════════════════════════════════════════
 // Generate a speaking/pronunciation exercise for a module
 // ═══════════════════════════════════════════════════════════════
-async function generateSpeaking(course, module, variant = 0) {
+async function generateSpeaking(course, module, variant = 0, llmOverrides) {
   const cacheKey = `speak:${course.id}:${module.id}:${variant}`;
 
   const cached = db.getContent(cacheKey);
@@ -113,7 +113,7 @@ async function generateSpeaking(course, module, variant = 0) {
   const content = await llm.chatJSON([
     { role: 'system', content: SYSTEM_PROMPT },
     { role: 'user',   content: prompt }
-  ]);
+  ], { overrides: llmOverrides });
 
   if (!content.exercises || !Array.isArray(content.exercises) || content.exercises.length === 0) {
     throw new Error('LLM returned invalid speaking structure');
@@ -194,7 +194,7 @@ function getLessonList(course, module) {
 // ═══════════════════════════════════════════════════════════════
 // Load or generate a specific lesson
 // ═══════════════════════════════════════════════════════════════
-async function getLesson(course, module, lessonId) {
+async function getLesson(course, module, lessonId, llmOverrides) {
   // Parse lesson ID to determine type
   const quizMatch  = lessonId.match(/^(.+)-quiz-(\d+)$/);
   const vocabMatch = lessonId.match(/^(.+)-vocab-(\d+)$/);
@@ -202,15 +202,15 @@ async function getLesson(course, module, lessonId) {
 
   if (quizMatch) {
     const variant = parseInt(quizMatch[2], 10);
-    return generateQuiz(course, module, variant);
+    return generateQuiz(course, module, variant, llmOverrides);
   }
   if (vocabMatch) {
     const topicIndex = parseInt(vocabMatch[2], 10);
-    return generateVocabulary(course, module, topicIndex);
+    return generateVocabulary(course, module, topicIndex, llmOverrides);
   }
   if (speakMatch) {
     const variant = parseInt(speakMatch[2], 10);
-    return generateSpeaking(course, module, variant);
+    return generateSpeaking(course, module, variant, llmOverrides);
   }
 
   throw new Error(`Unknown lesson format: ${lessonId}`);
