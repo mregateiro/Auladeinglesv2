@@ -99,30 +99,20 @@ const App = {
 
   // ─── Inicializar ─────────────────────────────────────────
   async init() {
-    await this.loadAuthConfig();
-
-    try {
-      const session = await this.api('/api/auth/session');
-      if (session.account) {
-        this.setCurrentAccount(session.account);
+    // Android/local mode: skip server session, go straight to user selection.
+    // Restore last logged-in user from localStorage if available.
+    const lastUserId = localStorage.getItem('aula_lastUserId');
+    if (lastUserId) {
+      try {
+        const user = await this.api(`/api/users/${lastUserId}/login`, { method: 'POST', body: {} });
+        if (user) {
+          this.setCurrentUser(user);
+          this.showCourseSelection();
+          return;
+        }
+      } catch (e) {
+        localStorage.removeItem('aula_lastUserId');
       }
-      if (session.user) {
-        this.setCurrentUser(session.user);
-      }
-      // If there is an encrypted API key stored locally, prompt for PIN
-      if (this.hasStoredApiKey()) {
-        await this.ensureApiKeyUnlocked();
-      }
-      if (session.needsProfileSelection) {
-        this.showProfileSelection();
-        return;
-      }
-      if (session.user) {
-        this.showCourseSelection();
-        return;
-      }
-    } catch (e) {
-      console.error('Sessão anterior não restaurada:', e.message);
     }
 
     this.showUserSelection();
@@ -130,22 +120,11 @@ const App = {
 
   // ─── API Helper ──────────────────────────────────────────
   async api(url, options = {}) {
-    const headers = { 'Content-Type': 'application/json', ...options.headers };
-    // Attach decrypted API key if available (never stored server-side)
+    // In local/Android mode, route through LocalAPI instead of server fetch
     if (this._llmApiKey) {
-      headers['X-LLM-Key'] = this._llmApiKey;
+      LocalAPI.setApiKey(this._llmApiKey);
     }
-    const res = await fetch(url, {
-      credentials: 'same-origin',
-      ...options,
-      headers,
-      body: options.body ? JSON.stringify(options.body) : undefined,
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Pedido falhou' }));
-      throw new Error(err.error || 'Pedido falhou');
-    }
-    return res.json();
+    return LocalAPI.fetch(url, options);
   },
 
   escapeHtml(value) {
@@ -640,11 +619,9 @@ const App = {
 
   async logoutAccount() {
     await this.api('/api/logout', { method: 'POST' }).catch(() => {});
+    localStorage.removeItem('aula_lastUserId');
     this.clearCurrentUser();
     this.clearCurrentAccount();
-    if (window.google?.accounts?.id) {
-      window.google.accounts.id.disableAutoSelect();
-    }
     this.showUserSelection();
   },
 
@@ -732,6 +709,7 @@ const App = {
       this.userId = user.id;
       this.userName = user.name;
       this.userAvatar = user.avatar;
+      localStorage.setItem('aula_lastUserId', String(user.id));
       this.showCourseSelection();
     } catch (err) {
       alert('Erro: ' + err.message);
@@ -782,6 +760,7 @@ const App = {
       this.userId = user.id;
       this.userName = user.name;
       this.userAvatar = user.avatar;
+      localStorage.setItem('aula_lastUserId', String(user.id));
       document.querySelector('.modal-overlay')?.remove();
       this.showCourseSelection();
     } catch (err) {
@@ -931,13 +910,10 @@ const App = {
   // ─── Terminar Sessão ─────────────────────────────────────
   async logout() {
     await this.api('/api/logout', { method: 'POST' }).catch(() => {});
-    document.cookie = 'userId=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+    localStorage.removeItem('aula_lastUserId');
     this.clearCurrentUser();
     this.clearCurrentAccount();
     this.currentCourse = null;
-    if (window.google?.accounts?.id) {
-      window.google.accounts.id.disableAutoSelect();
-    }
     this.showUserSelection();
   },
 
