@@ -19,7 +19,8 @@ CRITICAL TRANSLATION RULES:
   function _getLlmOverrides() {
     const cfg = LocalDB.getLlmConfig();
     if (!cfg || !cfg.provider) return undefined;
-    // Get the decrypted API key from the App's in-memory store
+    // The decrypted API key lives in App._llmApiKey (in-memory only, never persisted).
+    // We access it directly here since all modules share the same global scope.
     const llmApiKey = (typeof App !== 'undefined' && App._llmApiKey) ? App._llmApiKey : undefined;
     return {
       provider: cfg.provider,

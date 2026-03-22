@@ -18,6 +18,11 @@ const LocalDB = (() => {
     _seq: { accounts: 1, users: 1, progress: 1, vocabulary: 1, streaks: 1, activityLog: 1, llmConfigs: 1 }
   };
 
+  // structuredClone fallback for older Android WebView versions
+  const _clone = typeof structuredClone === 'function'
+    ? structuredClone
+    : (obj) => JSON.parse(JSON.stringify(obj));
+
   function _load() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -32,7 +37,7 @@ const LocalDB = (() => {
     } catch (e) {
       console.error('[LocalDB] Corrupt data – starting fresh:', e.message);
     }
-    return structuredClone(EMPTY_DB);
+    return _clone(EMPTY_DB);
   }
 
   let data = _load();

@@ -7,6 +7,10 @@ const LocalAPI = (() => {
   // Course data loaded from bundled CoursesData
   const courses = CoursesData;
 
+  // In standalone mode, all users share a single local "account" for LLM config
+  const LOCAL_ACCOUNT_ID = 1;
+  const LOCAL_ACCOUNT = { id: LOCAL_ACCOUNT_ID, name: 'Local', email: null, picture: null };
+
   function getCourse(courseId) { return courses[courseId] || null; }
   function getModule(course, moduleId) { return course.modules.find(m => m.id === moduleId) || null; }
 
@@ -115,8 +119,7 @@ const LocalAPI = (() => {
           throw new Error('No active session');
         }
         return {
-          // In the local app, we simulate an "account" so LLM settings work
-          account: { id: 1, name: 'Local', email: null, picture: null },
+          account: LOCAL_ACCOUNT,
           user: serializeUser(user),
           needsProfileSelection: false,
         };
